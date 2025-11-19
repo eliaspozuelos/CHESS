@@ -49,30 +49,30 @@ npm run build
 npm start
 ```
 
-## 3) Ejecutar el backend (carpeta `server/`)
-- Cambia al directorio `server`:
+## 3) Ejecutar el backend (carpeta `backend/`)
+- Cambia al directorio `backend`:
 
 ```powershell
-cd .\server
+cd .\backend
 ```
 
-- Copia el `.env.example` a `.env` y edítalo si hace falta (puedes ajustar `PORT` y `ORIGIN`):
+- Copia el `.env.example` a `.env` (ya hay un `.env` configurado):
 
 ```powershell
 copy .env.example .env
-# luego edita .env con tu editor favorito
+# El archivo .env ya está configurado con valores por defecto
 ```
 
-- Instala dependencias del server:
+- Instala dependencias del backend:
 
 ```powershell
-# dentro de server/
+# dentro de backend/
 pnpm install
 # o
 npm install
 ```
 
-- Ejecuta el server en modo desarrollo:
+- Ejecuta el backend en modo desarrollo:
 
 ```powershell
 pnpm dev
@@ -80,51 +80,28 @@ pnpm dev
 npm run dev
 ```
 
-- Por defecto el server usa el puerto de `.env` (ej: 4000). Si hay errores, revisa la consola.
+- Por defecto el backend usa el puerto 4000. Verás el mensaje: `✅ Server is running on port 4000`
 
-## 4) Problema conocido: `FST_ERR_PLUGIN_VERSION_MISMATCH` (Fastify / @fastify/cors)
+## 4) Configurar Stockfish (Opcional pero recomendado)
 
-Síntoma: Al arrancar el servidor aparece un error indicando que un plugin (por ejemplo `@fastify/cors`) requiere `fastify` 4.x pero está instalada la 5.x.
+Stockfish es el motor de ajedrez que proporciona la IA. El backend funcionará sin él pero con movimientos aleatorios.
 
-Soluciones (elige una):
+### Windows:
+1. Descarga Stockfish desde [stockfishchess.org](https://stockfishchess.org/download/)
+2. Extrae el archivo y copia la ruta de `stockfish.exe`
+3. Edita `backend/.env` y añade: `STOCKFISH_PATH=C:\ruta\a\stockfish.exe`
 
-### Opción A — Downgrade de `fastify` a 4.x (rápido y fiable)
-
-```powershell
-cd .\server
-# con pnpm
-pnpm add fastify@^4
-# o con npm
-npm install fastify@^4
-# luego arranca
-pnpm dev
+### Linux:
+```bash
+sudo apt-get install stockfish
 ```
 
-Esto suele resolver inmediatamente el chequeo de la versión del plugin.
-
-### Opción B — Actualizar el plugin a una versión compatible con `fastify` 5.x (más correcto a largo plazo)
-
-1. Investiga la compatibilidad del plugin:
-
-```powershell
-cd .\server
-npm view @fastify/cors peerDependencies
+### Mac:
+```bash
+brew install stockfish
 ```
 
-2. Si existe una versión de `@fastify/cors` compatible con Fastify 5, instálala explícitamente:
-
-```powershell
-pnpm add @fastify/cors@<versión-compatible>
-# o npm install @fastify/cors@<versión-compatible>
-```
-
-3. Arranca el servidor de nuevo.
-
-Si no hay versión compatible disponible, usa la Opción A.
-
-### Opción C — Forzar/ignorar (no recomendado)
-
-No se aconseja. Mejor cambiar versiones.
+Si Stockfish está en el PATH del sistema, no necesitas configurar `STOCKFISH_PATH`.
 
 ## 5) Troubleshooting rápido
 

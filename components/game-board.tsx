@@ -11,6 +11,9 @@ import PlayerInfo from "@/components/player-info"
 import MoveLog from "@/components/move-log"
 import TeachModePanel from "@/components/teach-mode-panel"
 import { type ChessBoard, initializeBoard } from "@/lib/chess-engine"
+import { apiFetch } from '@/lib/backend-api'
+import useGameSocket from '@/hooks/useGameSocket'
+import { makeMove as engineMakeMove } from '@/lib/chess-engine'
 import { RotateCcw, Pause as Pause2, Play, Flag, GraduationCap, Eye, EyeOff } from "lucide-react"
 import type { User, GameType } from "@/lib/types"
 import { generateTeachContent, type TeachContent } from "@/lib/teach-mode"
@@ -71,11 +74,115 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
     onGameEnd(winner === "white" ? "win" : "loss")
   }
 
+  const [currentGameId, setCurrentGameId] = useState<string | null>(null)
+
   useEffect(() => {
-    setBoard(initializeBoard())
+    const initialBoard = initializeBoard()
+    setBoard(initialBoard)
     gameStartTime.current = Date.now()
+    // pick up game id set by the starter (created in app/page)
+    try {
+      const g = (window as any).__CURRENT_GAME_ID as string | undefined
+      setCurrentGameId(g ?? null)
+
+      // If white player is AI, request first move after board is ready
+      if (g && gameConfig.whitePlayer.type === 'ai') {
+        console.log('\n🎮 ═══════════════════════════════════════')
+        console.log('   INICIO DE PARTIDA')
+        console.log('   Blancas: IA - Solicitando primer movimiento')
+        console.log('═══════════════════════════════════════\n')
+        setTimeout(() => {
+          requestAIMoveIfNeeded(initialBoard)
+        }, 1000)
+      }
+    } catch (e) {
+      setCurrentGameId(null)
+    }
   }, [])
 
+  // socket: update board when server broadcasts a move_made
+  const { emitMove, emitRequestAIMove } = useGameSocket(currentGameId, {
+    onMoveMade: (payload) => {
+      try {
+        console.log('\n📨 ═══════════════════════════════════════')
+        console.log('   Movimiento recibido del servidor')
+        console.log('   Payload:', JSON.stringify(payload, null, 2))
+        console.log('═══════════════════════════════════════')
+
+        const mv = payload.move || {}
+        let from = ''
+        let to = ''
+        if (mv.uci) {
+          from = mv.uci.slice(0, 2)
+          to = mv.uci.slice(2, 4)
+        } else if (mv.from && mv.to) {
+          from = mv.from
+          to = mv.to
+        } else if (typeof mv === 'string' && mv.length >= 4) {
+          from = mv.slice(0, 2)
+          to = mv.slice(2, 4)
+        }
+        if (from && to && board) {
+          const piece = board.squares[from]?.type || '?'
+          const pieceNames: Record<string, string> = {
+            'p': '♟️ Peón',
+            'n': '♞ Caballo',
+            'b': '♝ Alfil',
+            'r': '♜ Torre',
+            'q': '♛ Reina',
+            'k': '♚ Rey',
+            '?': '♟️ ?'
+          }
+          const pieceName = pieceNames[piece] || '♟️ ?'
+
+          console.log(`\n${pieceName.split(' ')[0]} ═══════════════════════════════════════`)
+          console.log(`   EJECUTANDO MOVIMIENTO`)
+          console.log(`   ${from.toUpperCase()} → ${to.toUpperCase()}`)
+          console.log(`   Pieza: ${pieceName}`)
+          console.log(`═══════════════════════════════════════\n`)
+
+          const newBoard = engineMakeMove(board, from, to)
+          setBoard(newBoard)
+          setMoves((m) => [...m, `${from}${to}`])
+
+          console.log('✅ Tablero actualizado exitosamente\n')
+
+          // Check if next player is AI and request AI move
+          setTimeout(() => {
+            requestAIMoveIfNeeded(newBoard)
+          }, 500)
+        }
+      } catch (e) {
+        console.error('❌ Error en socket move_made handler:', e)
+      }
+    },
+  })
+
+  // Function to check if current player is AI and request move
+  const requestAIMoveIfNeeded = async (currentBoard: ChessBoard) => {
+    if (!currentGameId || predictionMode || gameStatus !== 'playing') return
+
+    const currentPlayer = currentBoard.currentPlayer
+    const playerConfig = currentPlayer === 'w' ? gameConfig.whitePlayer : gameConfig.blackPlayer
+
+    if (playerConfig.type === 'ai') {
+      try {
+        const playerColor = currentPlayer === 'w' ? 'Blancas' : 'Negras'
+        const aiModel = playerConfig.aiModel || 'IA'
+        console.log(`\n🤖 ═══════════════════════════════════════`)
+        console.log(`   Turno de ${playerColor} (${aiModel})`)
+        console.log(`   Solicitando movimiento de IA...`)
+        console.log(`═══════════════════════════════════════\n`)
+
+        // Request AI move via socket
+        if (emitRequestAIMove) {
+          emitRequestAIMove()
+        }
+      } catch (e) {
+        console.error('❌ Error al solicitar movimiento de IA:', e)
+      }
+    }
+  }
   useEffect(() => {
     if (!isPaused && !predictionMode && board && gameStatus === "playing") {
       timerRef.current = setInterval(() => {
@@ -125,23 +232,53 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
   }
 
   const handleMove = (move: string) => {
-    if (board) {
-      if (predictionMode) {
-        setPredictionMoves([...predictionMoves, move])
-      } else {
-        setMoves([...moves, move])
-      }
+    if (!board) return
 
-      if (teachModeEnabled && !predictionMode) {
-        const isAIMove =
-          (board.currentPlayer === "w" && gameConfig.whitePlayer.type === "ai") ||
-          (board.currentPlayer === "b" && gameConfig.blackPlayer.type === "ai")
+    const from = move.slice(0, 2)
+    const to = move.slice(2, 4)
 
-        if (isAIMove) {
-          const content = generateTeachContent(board, move)
-          setCurrentTeachContent(content)
-          setShowTeachPanel(true)
+    // If we have a gameId, send to backend and wait for server confirmation
+    if (currentGameId) {
+      ; (async () => {
+        try {
+          const res = await apiFetch(`/api/games/${currentGameId}/move`, {
+            method: 'POST',
+            body: JSON.stringify({ from, to }),
+          })
+          // server accepted move; update local board to server's fen
+          const mv = res.move
+          // apply move locally using engine
+          const newBoard = engineMakeMove(board, from, to)
+          setBoard(newBoard)
+          setMoves((m) => [...m, `${from}${to}`])
+
+          // Check if next player is AI and request move
+          setTimeout(() => {
+            requestAIMoveIfNeeded(newBoard)
+          }, 500)
+        } catch (e) {
+          console.error('move failed', e)
         }
+      })()
+      return
+    }
+
+    // local-only mode (no gameId)
+    if (predictionMode) {
+      setPredictionMoves([...predictionMoves, move])
+    } else {
+      setMoves([...moves, move])
+    }
+
+    if (teachModeEnabled && !predictionMode) {
+      const isAIMove =
+        (board.currentPlayer === "w" && gameConfig.whitePlayer.type === "ai") ||
+        (board.currentPlayer === "b" && gameConfig.blackPlayer.type === "ai")
+
+      if (isAIMove) {
+        const content = generateTeachContent(board, move)
+        setCurrentTeachContent(content)
+        setShowTeachPanel(true)
       }
     }
   }

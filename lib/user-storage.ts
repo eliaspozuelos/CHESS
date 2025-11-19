@@ -1,6 +1,7 @@
 // User management with localStorage
 
 import type { User, UserStats, GameResult } from "./types"
+import { apiFetch } from './backend-api'
 
 const USERS_KEY = "chess_users"
 const CURRENT_USER_KEY = "chess_current_user"
@@ -65,38 +66,48 @@ async function hashStringSHA256(input: string): Promise<string> {
 
 // Create new user (async because password hashing uses Web Crypto)
 export async function createUser(username: string, password?: string): Promise<User> {
-  const passwordHash = password ? await hashStringSHA256(password) : undefined
-
-  const user: User = {
-    // use crypto.randomUUID to avoid time-based non-determinism during renders
-    id: typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function' ? (crypto as any).randomUUID() : Date.now().toString(),
-    username,
-    passwordHash,
-    createdAt: new Date().toISOString(),
-    stats: createEmptyStats(),
-    gameHistory: [],
+  // Prefer creating user via backend if available
+  try {
+    const res = await apiFetch('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    const user: User = res.user
+    // persist minimal client-side state
+    const users = getAllUsers()
+    if (!users.find((u) => u.id === user.id)) {
+      users.push(user)
+      saveAllUsers(users)
+    }
+    setCurrentUser(user.id)
+    return user
+  } catch (e: any) {
+    // If backend error, show it
+    throw new Error(e.error || 'Error al crear usuario')
   }
-
-  const users = getAllUsers()
-  users.push(user)
-  saveAllUsers(users)
-  setCurrentUser(user.id)
-
-  return user
 }
 
 // Authenticate user by username + password, returns the user or null
 export async function authenticateUser(username: string, password: string): Promise<User | null> {
-  const users = getAllUsers()
-  const user = users.find((u) => u.username === username)
-  if (!user) return null
-  if (!user.passwordHash) return null
-  const passHash = await hashStringSHA256(password)
-  if (passHash === user.passwordHash) {
+  // Try backend authentication first
+  try {
+    const res = await apiFetch('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    const user: User = res.user
+    // persist minimal client-side state
+    const users = getAllUsers()
+    if (!users.find((u) => u.id === user.id)) {
+      users.push(user)
+      saveAllUsers(users)
+    }
     setCurrentUser(user.id)
     return user
+  } catch (e) {
+    console.error('Authentication error:', e)
+    return null
   }
-  return null
 }
 
 // Update user stats after a game
@@ -158,6 +169,11 @@ export function getLeaderboard(): User[] {
 }
 
 // Logout current user
-export function logoutUser(): void {
+export async function logoutUser(): Promise<void> {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' })
+  } catch (e) {
+    console.error('Logout error:', e)
+  }
   localStorage.removeItem(CURRENT_USER_KEY)
 }

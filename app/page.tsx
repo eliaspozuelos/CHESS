@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { apiFetch } from '@/lib/backend-api'
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import Header from "@/components/header"
@@ -40,9 +41,26 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<string>("game")
 
   const handleStartGame = (config: GameConfig) => {
-    setGameConfig(config)
-    setMoves([])
-    setGameState("playing")
+    // create game on backend
+    ; (async () => {
+      setGameConfig(config)
+      setMoves([])
+      try {
+        const res = await apiFetch('/api/games/create', {
+          method: 'POST',
+          body: JSON.stringify({ config }),
+        })
+        const gameId = res.game?.id
+        console.log('Game created:', gameId)
+        // store game id so GameBoard can connect via WebSocket
+        setGameState('playing')
+          // Set global variable for GameBoard to pick up
+          ; (window as any).__CURRENT_GAME_ID = gameId
+      } catch (e) {
+        console.error('Failed to create game:', e)
+        setGameState('setup')
+      }
+    })()
   }
 
   const handleGameEnd = (result: "win" | "loss" | "draw") => {
