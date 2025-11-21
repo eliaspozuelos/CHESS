@@ -110,53 +110,75 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
         console.log('═══════════════════════════════════════')
 
         const mv = payload.move || {}
-        let from = ''
-        let to = ''
+        let from = ""
+        let to = ""
+
         if (mv.uci) {
           from = mv.uci.slice(0, 2)
           to = mv.uci.slice(2, 4)
         } else if (mv.from && mv.to) {
           from = mv.from
           to = mv.to
-        } else if (typeof mv === 'string' && mv.length >= 4) {
+        } else if (typeof mv === "string" && mv.length >= 4) {
           from = mv.slice(0, 2)
           to = mv.slice(2, 4)
         }
-        if (from && to && board) {
-          const piece = board.squares[from]?.type || '?'
-          const pieceNames: Record<string, string> = {
-            'p': '♟️ Peón',
-            'n': '♞ Caballo',
-            'b': '♝ Alfil',
-            'r': '♜ Torre',
-            'q': '♛ Reina',
-            'k': '♚ Rey',
-            '?': '♟️ ?'
-          }
-          const pieceName = pieceNames[piece] || '♟️ ?'
 
-          console.log(`\n${pieceName.split(' ')[0]} ═══════════════════════════════════════`)
+        if (!from || !to) {
+          console.warn("⚠️ No se pudo determinar from/to del payload:", payload)
+          return
+        }
+
+        // ✅ Usar SIEMPRE la versión más reciente del tablero
+        let updatedBoard: ChessBoard | null = null
+
+        setBoard((prev) => {
+          if (!prev) return prev
+
+          const piece = prev.squares[from]?.type || "?"
+          const pieceNames: Record<string, string> = {
+            p: "♟️ Peón",
+            n: "♞ Caballo",
+            b: "♝ Alfil",
+            r: "♜ Torre",
+            q: "♛ Reina",
+            k: "♚ Rey",
+            "?": "♟️ ?",
+          }
+          const pieceName = pieceNames[piece] || "♟️ ?"
+
+          console.log(`\n${pieceName.split(" ")[0]} ═══════════════════════════════════════`)
           console.log(`   EJECUTANDO MOVIMIENTO`)
           console.log(`   ${from.toUpperCase()} → ${to.toUpperCase()}`)
           console.log(`   Pieza: ${pieceName}`)
           console.log(`═══════════════════════════════════════\n`)
 
-          const newBoard = engineMakeMove(board, from, to)
-          setBoard(newBoard)
-          setMoves((m) => [...m, `${from}${to}`])
+          const nb = engineMakeMove(prev, from, to)
+          updatedBoard = nb
+          return nb
+        })
 
-          console.log('✅ Tablero actualizado exitosamente\n')
+        // Actualizar historial usando el estado anterior
+        setMoves((prev) => [...prev, `${from}${to}`])
 
-          // Check if next player is AI and request AI move
+        // Pedir jugada de IA si corresponde
+        if (updatedBoard) {
           setTimeout(() => {
-            requestAIMoveIfNeeded(newBoard)
+            requestAIMoveIfNeeded(updatedBoard as ChessBoard)
           }, 500)
         }
+
+        console.log("✅ Tablero actualizado exitosamente\n")
       } catch (e) {
-        console.error('❌ Error en socket move_made handler:', e)
+        console.error("❌ Error en socket move_made handler:", e)
       }
     },
+
+    onMoveError: (err) => {
+      console.error("❌ move_error desde el servidor:", err)
+    },
   })
+
 
   // Function to check if current player is AI and request move
   const requestAIMoveIfNeeded = async (currentBoard: ChessBoard) => {
@@ -237,38 +259,21 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
     const from = move.slice(0, 2)
     const to = move.slice(2, 4)
 
-    // If we have a gameId, send to backend and wait for server confirmation
+    // ✅ Con backend: mandar por socket y NO tocar el tablero aquí
     if (currentGameId) {
-      ; (async () => {
-        try {
-          const res = await apiFetch(`/api/games/${currentGameId}/move`, {
-            method: 'POST',
-            body: JSON.stringify({ from, to }),
-          })
-          // server accepted move; update local board to server's fen
-          const mv = res.move
-          // apply move locally using engine
-          const newBoard = engineMakeMove(board, from, to)
-          setBoard(newBoard)
-          setMoves((m) => [...m, `${from}${to}`])
-
-          // Check if next player is AI and request move
-          setTimeout(() => {
-            requestAIMoveIfNeeded(newBoard)
-          }, 500)
-        } catch (e) {
-          console.error('move failed', e)
-        }
-      })()
+      emitMove({ from, to })
       return
     }
 
-    // local-only mode (no gameId)
+    // 🧪 Modo local (sin backend)
     if (predictionMode) {
       setPredictionMoves([...predictionMoves, move])
     } else {
       setMoves([...moves, move])
     }
+
+    const newBoard = engineMakeMove(board, from, to)
+    setBoard(newBoard)
 
     if (teachModeEnabled && !predictionMode) {
       const isAIMove =
