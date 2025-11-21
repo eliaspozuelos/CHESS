@@ -20,9 +20,9 @@ STOCKFISH_PATH=D:/elias2/Desktop/CICLO2/IA/PROYECTO/backend/stockfish/stockfish/
 
 # AI Providers API Keys (optional - for advanced AI opponents)
 # Get your OpenAI API key from: https://platform.openai.com/api-keys
-OPENAI_API_KEY=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
-GEMINI_API_KEY=AIzaSyBaLhRUwHBQmwstAFjbSmoFc7cNkIDXwvE
-DEEPSEEK_API_KEY=sk-bf4223feb0c04123af7f3822336cf280
+#PENAI_API_KEY=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
+#GEMINI_API_KEY=AIzaSyBaLhRUwHBQmwstAFjbSmoFc7cNkIDXwvE
+#DEEPSEEK_API_KEY=sk-bf4223feb0c04123af7f3822336cf280
 
 # Redis Configuration (for BullMQ job queues)
 REDIS_HOST=localhost
