@@ -83,7 +83,9 @@ export async function createUser(username: string, password?: string): Promise<U
     return user
   } catch (e: any) {
     // If backend error, show it
-    throw new Error(e.error || 'Error al crear usuario')
+    const errorMsg = e.error || e.message || 'Error al crear usuario'
+    console.error('Error creating user:', errorMsg)
+    throw new Error(errorMsg)
   }
 }
 

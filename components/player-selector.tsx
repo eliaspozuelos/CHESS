@@ -15,7 +15,7 @@ interface PlayerSelectorProps {
   onPlayerChange: (config: PlayerConfig) => void
 }
 
-const AI_MODELS = ["ChatGPT-4", "Claude Sonnet", "Gemini Pro", "DeepSeek"]
+const AI_MODELS = ["Gemini Flash", "ChatGPT-3.5"]
 const AI_LEVELS = [
   { value: "beginner", label: "Principiante" },
   { value: "intermediate", label: "Intermedio" },
@@ -60,7 +60,7 @@ export default function PlayerSelector({ color, playerConfig, onPlayerChange }: 
               onClick={() =>
                 onPlayerChange({
                   type: "ai",
-                  aiModel: "ChatGPT-4",
+                  aiModel: "Gemini Pro",
                   aiLevel: "intermediate",
                 })
               }
@@ -91,7 +91,7 @@ export default function PlayerSelector({ color, playerConfig, onPlayerChange }: 
             <div className="space-y-2">
               <Label className="text-sm font-medium text-foreground">Modelo de IA</Label>
               <select
-                value={playerConfig.aiModel || "ChatGPT-4"}
+                value={playerConfig.aiModel || "Gemini Pro"}
                 onChange={(e) =>
                   onPlayerChange({
                     ...playerConfig,

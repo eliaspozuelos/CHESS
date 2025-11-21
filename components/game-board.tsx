@@ -14,9 +14,11 @@ import { type ChessBoard, initializeBoard } from "@/lib/chess-engine"
 import { apiFetch } from '@/lib/backend-api'
 import useGameSocket from '@/hooks/useGameSocket'
 import { makeMove as engineMakeMove } from '@/lib/chess-engine'
-import { RotateCcw, Pause as Pause2, Play, Flag, GraduationCap, Eye, EyeOff } from "lucide-react"
+import { RotateCcw, Pause as Pause2, Play, Flag, GraduationCap, Eye, EyeOff, AlertCircle } from "lucide-react"
 import type { User, GameType } from "@/lib/types"
+import { getCurrentUser } from "@/lib/user-storage"
 import { generateTeachContent, type TeachContent } from "@/lib/teach-mode"
+import { useToast } from "@/hooks/use-toast"
 
 interface GameConfig {
   whitePlayer: {
@@ -35,10 +37,11 @@ interface GameConfig {
 interface GameBoardProps {
   gameConfig: GameConfig
   currentUser: User | null
-  onGameEnd: (result: "win" | "loss" | "draw") => void
+  onGameEnd: (result: "win" | "loss" | "draw", moves: string[]) => void
 }
 
 export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBoardProps) {
+  const { toast } = useToast()
   const [board, setBoard] = useState<ChessBoard | null>(null)
   const [moves, setMoves] = useState<string[]>([])
   const [isPaused, setIsPaused] = useState(false)
@@ -51,6 +54,7 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
   const [savedBoard, setSavedBoard] = useState<ChessBoard | null>(null)
   const [savedMoves, setSavedMoves] = useState<string[]>([])
   const [predictionMoves, setPredictionMoves] = useState<string[]>([])
+  const [moveError, setMoveError] = useState<string | null>(null)
 
   const getInitialTime = (gameType: GameType) => {
     switch (gameType) {
@@ -69,9 +73,60 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
   const [blackTime, setBlackTime] = useState(getInitialTime(gameConfig.gameType))
   const gameStartTime = useRef<number | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastValidFen = useRef<string | null>(null)
 
-  const handleGameEnd = (winner: "white" | "black") => {
-    onGameEnd(winner === "white" ? "win" : "loss")
+  const handleGameEnd = async (winner: "white" | "black") => {
+    toast({
+      title: winner === "white" ? "🏆 Victoria de las Blancas" : "🏆 Victoria de las Negras",
+      description: gameStatus === "checkmate" ? "¡Jaque mate!" : gameStatus === "resigned" ? "El oponente se rindió" : "Juego terminado"
+    })
+
+    onGameEnd(winner === "white" ? "win" : "loss", moves)
+
+    // Save game statistics to backend
+    try {
+      const currentUser = getCurrentUser()
+      if (!currentUser || !gameStartTime.current) return
+
+      const gameDuration = Math.floor((Date.now() - gameStartTime.current) / 1000)
+      const userColor = gameConfig.whitePlayer.type === "human" ? "white" : "black"
+
+      // Determine opponent info
+      const opponentConfig = userColor === "white" ? gameConfig.blackPlayer : gameConfig.whitePlayer
+      const opponentType = opponentConfig.type
+      const opponentModel = opponentType === "ai" ? opponentConfig.aiModel : undefined
+
+      const gameResult = {
+        date: new Date().toISOString(),
+        gameType: gameConfig.gameType,
+        whitePlayer: gameConfig.whitePlayer.type === "ai"
+          ? `AI (${gameConfig.whitePlayer.aiModel})`
+          : currentUser.username,
+        blackPlayer: gameConfig.blackPlayer.type === "ai"
+          ? `AI (${gameConfig.blackPlayer.aiModel})`
+          : currentUser.username,
+        winner: winner,
+        moves: moves.length,
+        duration: gameDuration,
+        userColor: userColor,
+        opponentType: opponentType,
+        opponentModel: opponentModel
+      }
+
+      await apiFetch(`/api/users/${currentUser.id}/stats`, {
+        method: "POST",
+        body: JSON.stringify(gameResult)
+      })
+
+      console.log("✅ Statistics saved to backend")
+    } catch (err) {
+      console.error("❌ Error saving game statistics:", err)
+      toast({
+        title: "⚠️ Error al guardar estadísticas",
+        description: "No se pudieron guardar las estadísticas de la partida",
+        variant: "destructive"
+      })
+    }
   }
 
   const [currentGameId, setCurrentGameId] = useState<string | null>(null)
@@ -85,15 +140,14 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
       const g = (window as any).__CURRENT_GAME_ID as string | undefined
       setCurrentGameId(g ?? null)
 
-      // If white player is AI, request first move after board is ready
+      // ⚠️ NO solicitar movimiento inicial de IA aquí
+      // El backend lo maneja automáticamente en createGame para partidas AI vs AI
+      // Para humano vs AI, el backend solicita el movimiento después del primer movimiento del humano
       if (g && gameConfig.whitePlayer.type === 'ai') {
         console.log('\n🎮 ═══════════════════════════════════════')
         console.log('   INICIO DE PARTIDA')
-        console.log('   Blancas: IA - Solicitando primer movimiento')
+        console.log('   Blancas: IA - El backend manejará el primer movimiento')
         console.log('═══════════════════════════════════════\n')
-        setTimeout(() => {
-          requestAIMoveIfNeeded(initialBoard)
-        }, 1000)
       }
     } catch (e) {
       setCurrentGameId(null)
@@ -101,7 +155,7 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
   }, [])
 
   // socket: update board when server broadcasts a move_made
-  const { emitMove, emitRequestAIMove } = useGameSocket(currentGameId, {
+  const { emitMove, emitResign } = useGameSocket(currentGameId, {
     onMoveMade: (payload) => {
       try {
         console.log('\n📨 ═══════════════════════════════════════')
@@ -155,18 +209,21 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
 
           const nb = engineMakeMove(prev, from, to)
           updatedBoard = nb
+
+          // Save last valid move for reference
+          lastValidFen.current = `${from}${to}`
+
           return nb
         })
 
         // Actualizar historial usando el estado anterior
         setMoves((prev) => [...prev, `${from}${to}`])
 
-        // Pedir jugada de IA si corresponde
-        if (updatedBoard) {
-          setTimeout(() => {
-            requestAIMoveIfNeeded(updatedBoard as ChessBoard)
-          }, 500)
-        }
+        // Clear any error when move succeeds
+        setMoveError(null)
+
+        // ⚠️ NO pedir jugada de IA aquí - el backend lo maneja automáticamente
+        // El backend ya encola el siguiente movimiento de IA después de cada movimiento
 
         console.log("✅ Tablero actualizado exitosamente\n")
       } catch (e) {
@@ -176,35 +233,60 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
 
     onMoveError: (err) => {
       console.error("❌ move_error desde el servidor:", err)
+
+      // Show error alert
+      const errorMsg = err.error || "Este movimiento no es válido según las reglas del ajedrez"
+      setMoveError(errorMsg)
+
+      // Show toast notification
+      toast({
+        title: "❌ Movimiento Inválido",
+        description: errorMsg,
+        variant: "destructive"
+      })
+
+      // Auto-hide error after 5 seconds
+      setTimeout(() => setMoveError(null), 5000)
+
+      // Restore board to last valid state if we have it
+      if (lastValidFen.current && board) {
+        console.log("⚠️ Restaurando tablero al último estado válido")
+        // The board state will be restored when server sends next move_made
+      }
+    },
+
+    onGameResigned: (data) => {
+      console.log('🏳️ Game resigned received from server:', data)
+      const winner = data.color === 'w' ? 'black' : 'white'
+      setGameStatus('resigned')
+      handleGameEnd(winner)
+    },
+
+    onGameEnded: (data) => {
+      console.log('🏁 Game ended received from server:', data)
+      const status = data.reason === 'checkmate' ? 'checkmate' : data.reason === 'draw' ? 'stalemate' : 'playing'
+      setGameStatus(status)
+
+      // Show victory/defeat message
+      if (data.winner === 'draw') {
+        toast({
+          title: "🤝 Empate",
+          description: "La partida terminó en tablas",
+          duration: 6000
+        })
+        handleGameEnd('white') // Use any color, will be corrected in handleGameEnd based on draw
+      } else {
+        const isVictory = data.winner === 'white' // Assume player is white
+        toast({
+          title: isVictory ? "🏆 ¡Victoria!" : "😔 Derrota",
+          description: data.reason === 'checkmate' ? "¡Jaque mate!" : "Partida terminada",
+          duration: 6000
+        })
+        handleGameEnd(data.winner)
+      }
     },
   })
 
-
-  // Function to check if current player is AI and request move
-  const requestAIMoveIfNeeded = async (currentBoard: ChessBoard) => {
-    if (!currentGameId || predictionMode || gameStatus !== 'playing') return
-
-    const currentPlayer = currentBoard.currentPlayer
-    const playerConfig = currentPlayer === 'w' ? gameConfig.whitePlayer : gameConfig.blackPlayer
-
-    if (playerConfig.type === 'ai') {
-      try {
-        const playerColor = currentPlayer === 'w' ? 'Blancas' : 'Negras'
-        const aiModel = playerConfig.aiModel || 'IA'
-        console.log(`\n🤖 ═══════════════════════════════════════`)
-        console.log(`   Turno de ${playerColor} (${aiModel})`)
-        console.log(`   Solicitando movimiento de IA...`)
-        console.log(`═══════════════════════════════════════\n`)
-
-        // Request AI move via socket
-        if (emitRequestAIMove) {
-          emitRequestAIMove()
-        }
-      } catch (e) {
-        console.error('❌ Error al solicitar movimiento de IA:', e)
-      }
-    }
-  }
   useEffect(() => {
     if (!isPaused && !predictionMode && board && gameStatus === "playing") {
       timerRef.current = setInterval(() => {
@@ -212,6 +294,10 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
           setWhiteTime((t) => {
             const newTime = Math.max(0, t - 1)
             if (newTime === 0) {
+              toast({
+                title: "⏰ Tiempo agotado",
+                description: "Las Blancas se quedaron sin tiempo"
+              })
               handleGameEnd("black")
             }
             return newTime
@@ -220,6 +306,10 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
           setBlackTime((t) => {
             const newTime = Math.max(0, t - 1)
             if (newTime === 0) {
+              toast({
+                title: "⏰ Tiempo agotado",
+                description: "Las Negras se quedaron sin tiempo"
+              })
               handleGameEnd("white")
             }
             return newTime
@@ -259,6 +349,14 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
     const from = move.slice(0, 2)
     const to = move.slice(2, 4)
 
+    // 🧪 Modo predicción: completamente local, no enviar al servidor
+    if (predictionMode) {
+      setPredictionMoves([...predictionMoves, move])
+      const newBoard = engineMakeMove(board, from, to)
+      setBoard(newBoard)
+      return
+    }
+
     // ✅ Con backend: mandar por socket y NO tocar el tablero aquí
     if (currentGameId) {
       emitMove({ from, to })
@@ -266,11 +364,7 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
     }
 
     // 🧪 Modo local (sin backend)
-    if (predictionMode) {
-      setPredictionMoves([...predictionMoves, move])
-    } else {
-      setMoves([...moves, move])
-    }
+    setMoves([...moves, move])
 
     const newBoard = engineMakeMove(board, from, to)
     setBoard(newBoard)
@@ -303,9 +397,29 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
   }
 
   const handleResign = () => {
-    const winner = board?.currentPlayer === "w" ? "black" : "white"
-    setGameStatus("resigned")
-    handleGameEnd(winner)
+    if (!board) return
+    if (gameStatus !== "playing") {
+      toast({
+        title: "⚠️ Juego ya terminado",
+        description: "No puedes rendirte en un juego que ya terminó",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const confirmed = confirm("¿Estás seguro de que quieres rendirte?")
+    if (!confirmed) return
+
+    const currentColor = board.currentPlayer
+    console.log('🏳️ Resigning game as:', currentColor === 'w' ? 'Blancas' : 'Negras')
+
+    toast({
+      title: "🏳️ Rendición",
+      description: `Las ${currentColor === 'w' ? 'Blancas' : 'Negras'} se rindieron`
+    })
+
+    emitResign(currentColor)
+    // El estado se actualizará cuando recibamos el evento game_resigned del servidor
   }
 
   const formatTime = (seconds: number) => {
@@ -329,6 +443,18 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
             {gameStatus === "resigned" && "Partida rendida"}
           </p>
         </div>
+      )}
+
+      {moveError && (
+        <Alert variant="destructive" className="animate-in fade-in slide-in-from-top-2">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span className="font-semibold">{moveError}</span>
+            <Button size="sm" variant="ghost" onClick={() => setMoveError(null)} className="h-6 px-2">
+              Cerrar
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
 
       {predictionMode && (

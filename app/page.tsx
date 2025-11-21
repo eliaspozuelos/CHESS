@@ -37,10 +37,17 @@ export default function Home() {
     gameType: "rapid",
   })
   const [moves, setMoves] = useState<string[]>([])
+  const [gameResult, setGameResult] = useState<"win" | "loss" | "draw">("win")
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [activeTab, setActiveTab] = useState<string>("game")
 
   const handleStartGame = (config: GameConfig) => {
+    // Validación: Usuario debe estar logueado para jugar
+    if (!currentUser) {
+      alert('⚠️ Debes iniciar sesión para jugar')
+      return
+    }
+
     // create game on backend
     ; (async () => {
       setGameConfig(config)
@@ -51,19 +58,27 @@ export default function Home() {
           body: JSON.stringify({ config }),
         })
         const gameId = res.game?.id
+
+        if (!gameId) {
+          throw new Error('No se recibió ID de juego del servidor')
+        }
+
         console.log('Game created:', gameId)
         // store game id so GameBoard can connect via WebSocket
         setGameState('playing')
           // Set global variable for GameBoard to pick up
           ; (window as any).__CURRENT_GAME_ID = gameId
-      } catch (e) {
+      } catch (e: any) {
         console.error('Failed to create game:', e)
+        alert(`❌ Error al crear la partida: ${e.message || 'Error desconocido'}`)
         setGameState('setup')
       }
     })()
   }
 
-  const handleGameEnd = (result: "win" | "loss" | "draw") => {
+  const handleGameEnd = (result: "win" | "loss" | "draw", gameMoves: string[]) => {
+    setGameResult(result)
+    setMoves(gameMoves)
     setGameState("finished")
   }
 
@@ -113,7 +128,7 @@ export default function Home() {
                     <Button variant="outline" onClick={handleBackToSetup} className="mb-4 bg-transparent">
                       Nueva Partida
                     </Button>
-                    <GameAnalysis moves={moves} result="win" />
+                      <GameAnalysis moves={moves} result={gameResult} />
                   </div>
                 )}
               </TabsContent>

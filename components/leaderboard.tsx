@@ -13,12 +13,14 @@ type SortBy = "wins" | "winRate" | "gamesPlayed"
 export default function Leaderboard() {
   const [users, setUsers] = useState<User[]>([])
   const [sortBy, setSortBy] = useState<SortBy>("wins")
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadLeaderboard()
   }, [sortBy])
 
   const loadLeaderboard = () => {
+    setLoading(true)
     const allUsers = getLeaderboard()
 
     const sorted = [...allUsers].sort((a, b) => {
@@ -37,6 +39,7 @@ export default function Leaderboard() {
     })
 
     setUsers(sorted)
+    setLoading(false)
   }
 
   const getRankIcon = (rank: number) => {
@@ -99,7 +102,12 @@ export default function Leaderboard() {
       </div>
 
       {/* Leaderboard */}
-      {users.length === 0 ? (
+      {loading ? (
+        <Card className="p-12 text-center">
+          <div className="h-16 w-16 mx-auto mb-4 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-lg font-medium text-muted-foreground">Cargando clasificación...</p>
+        </Card>
+      ) : users.length === 0 ? (
         <Card className="p-12 text-center">
           <Trophy className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
           <p className="text-lg font-medium text-muted-foreground">No hay jugadores registrados aún</p>
@@ -115,7 +123,7 @@ export default function Leaderboard() {
             return (
               <Card
                 key={user.id}
-                className={`p-4 transition-all ${isTopThree ? "bg-gradient-to-r from-primary/5 to-primary/10 border-primary/30" : ""
+                className={`p-4 transition-all ${isTopThree ? "bg-linear-to-r from-primary/5 to-primary/10 border-primary/30" : ""
                   }`}
               >
                 <div className="flex items-center gap-4">

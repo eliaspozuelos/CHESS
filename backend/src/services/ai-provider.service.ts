@@ -1,7 +1,7 @@
 import { Chess } from 'chess.js'
 import axios from 'axios'
 
-type AIModel = 'gpt-4' | 'gpt-3.5-turbo' | 'gemini-pro' | 'gemini-1.5-flash' | 'stockfish'
+type AIModel = 'gpt-3.5-turbo' | 'gemini-2.0-flash-lite' | 'stockfish'
 type AILevel = 'beginner' | 'intermediate' | 'advanced' | 'master'
 
 interface AIMove {
@@ -31,11 +31,11 @@ class AIProviderService {
         return null
       }
 
-      if (model.startsWith('gpt-')) {
+      if (model === 'gpt-3.5-turbo') {
         return await this.getOpenAIMove(model, fen, level, moveHistory)
       }
 
-      if (model.startsWith('gemini-')) {
+      if (model === 'gemini-2.0-flash-lite') {
         return await this.getGeminiMove(model, fen, level, moveHistory)
       }
 
@@ -115,14 +115,13 @@ class AIProviderService {
     const systemPrompt = 'You are a chess engine. Respond ONLY with a move in UCI format (e.g., "e2e4" or "e7e8q" for promotion). No explanations.'
 
     try {
-      // Gemini uses different model names in the API
-      const geminiModel = model === 'gemini-pro' ? 'gemini-1.5-pro-latest' : 'gemini-1.5-flash-latest'
-      
+      // Usar el modelo directamente (solo soportamos gemini-2.0-flash-lite)
       const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${this.geminiApiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`,
         {
           contents: [
             {
+              role: 'user',
               parts: [
                 {
                   text: systemPrompt + '\n\n' + prompt
@@ -132,7 +131,7 @@ class AIProviderService {
           ],
           generationConfig: {
             temperature: this.getTemperature(level),
-            maxOutputTokens: 10,
+            maxOutputTokens: 20,
             topP: 0.95,
             topK: 40
           }
@@ -141,14 +140,24 @@ class AIProviderService {
           headers: {
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 15000
         }
       )
 
+      if (!response.data.candidates || response.data.candidates.length === 0) {
+        console.error('Gemini API returned no candidates')
+        return null
+      }
+
       const moveText = response.data.candidates[0].content.parts[0].text.trim()
+      console.log(`🤖 Gemini response: "${moveText}"`)
       return this.parseUCIMove(moveText)
     } catch (error: any) {
-      console.error('Gemini API error:', error.response?.data || error.message)
+      if (error.response) {
+        console.error('Gemini API error:', JSON.stringify(error.response.data, null, 2))
+      } else {
+        console.error('Gemini API error:', error.message)
+      }
       return null
     }
   }
@@ -220,10 +229,8 @@ Choose the best move and respond ONLY with the move in UCI format (e.g., "e2e4" 
   getAvailableModels(): { model: AIModel; name: string; configured: boolean }[] {
     return [
       { model: 'stockfish', name: 'Stockfish (Local)', configured: true },
-      { model: 'gpt-4', name: 'GPT-4 (OpenAI)', configured: this.isConfigured('gpt-4') },
-      { model: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo (OpenAI)', configured: this.isConfigured('gpt-3.5-turbo') },
-      { model: 'gemini-pro', name: 'Gemini 1.5 Pro (Google)', configured: this.isConfigured('gemini-pro') },
-      { model: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Google)', configured: this.isConfigured('gemini-1.5-flash') }
+      { model: 'gpt-3.5-turbo', name: 'ChatGPT-3.5 (OpenAI)', configured: this.isConfigured('gpt-3.5-turbo') },
+      { model: 'gemini-2.0-flash-lite', name: 'Gemini Flash (Google)', configured: this.isConfigured('gemini-2.0-flash-lite') }
     ]
   }
 }

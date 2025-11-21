@@ -300,31 +300,41 @@ class UserService {
     }
   }
 
-  async getLeaderboard(limit: number = 10): Promise<Array<{
-    username: string
-    gamesWon: number
-    gamesPlayed: number
-    winRate: number
-  }>> {
+  async getLeaderboard(limit: number = 10): Promise<any[]> {
     try {
       const result = await query(
-        `SELECT u.username, s.games_won, s.games_played,
-                CASE WHEN s.games_played > 0 
-                     THEN CAST(s.games_won AS FLOAT) / s.games_played 
-                     ELSE 0 
-                END as win_rate
+        `SELECT u.id, u.username, u.created_at,
+                s.games_played, s.games_won, s.games_lost, s.games_draw,
+                s.total_moves, s.total_time, s.average_moves_per_win, s.average_time_per_win,
+                s.normal_played, s.normal_won, s.rapid_played, s.rapid_won, 
+                s.blitz_played, s.blitz_won
          FROM users u
          LEFT JOIN user_stats s ON u.id = s.user_id
-         ORDER BY s.games_won DESC
+         ORDER BY s.games_won DESC NULLS LAST
          LIMIT $1`,
         [limit]
       )
 
       return result.rows.map((row: any) => ({
+        id: row.id,
         username: row.username,
-        gamesWon: row.games_won || 0,
-        gamesPlayed: row.games_played || 0,
-        winRate: parseFloat(row.win_rate) || 0
+        createdAt: row.created_at,
+        stats: {
+          gamesPlayed: row.games_played || 0,
+          gamesWon: row.games_won || 0,
+          gamesLost: row.games_lost || 0,
+          gamesDraw: row.games_draw || 0,
+          totalMoves: row.total_moves || 0,
+          totalTime: row.total_time || 0,
+          averageMovesPerWin: row.average_moves_per_win || 0,
+          averageTimePerWin: row.average_time_per_win || 0,
+          byGameType: {
+            normal: { played: row.normal_played || 0, won: row.normal_won || 0 },
+            rapid: { played: row.rapid_played || 0, won: row.rapid_won || 0 },
+            blitz: { played: row.blitz_played || 0, won: row.blitz_won || 0 },
+          }
+        },
+        gameHistory: []
       }))
     } catch (error) {
       console.error('Error getting leaderboard:', error)

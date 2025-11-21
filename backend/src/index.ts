@@ -1,9 +1,13 @@
+import dotenv from 'dotenv'
+
+// Load environment variables FIRST, before any other imports
+dotenv.config()
+
 import express from 'express'
 import http from 'http'
 import { Server as SocketIOServer } from 'socket.io'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
-import dotenv from 'dotenv'
 
 import authRoutes from './routes/auth.routes'
 import userRoutes from './routes/user.routes'
@@ -11,9 +15,7 @@ import gameRoutes from './routes/game.routes'
 import { setupSocketHandlers } from './socket/game.socket'
 import StockfishService from './services/stockfish.service'
 import { initializeDatabase, testConnection, closeDatabase } from './database/init'
-
-// Load environment variables
-dotenv.config()
+import './workers/ai-move.worker' // Import worker to start it in the same process
 
 const app = express()
 const server = http.createServer(app)

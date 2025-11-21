@@ -4,8 +4,9 @@ import { useEffect, useRef } from 'react'
 import { io, type Socket } from 'socket.io-client'
 
 type MoveMade = { move: any; fen: string }
+type GameEnded = { winner: 'white' | 'black' | 'draw'; reason: 'checkmate' | 'draw'; moves: string[] }
 
-export function useGameSocket(gameId: string | null, handlers: { onMoveMade?: (p: MoveMade) => void; onMoveError?: (e: any) => void } = {}) {
+export function useGameSocket(gameId: string | null, handlers: { onMoveMade?: (p: MoveMade) => void; onMoveError?: (e: any) => void; onGameResigned?: (data: { color: 'w' | 'b' }) => void; onGameEnded?: (data: GameEnded) => void } = {}) {
   const socketRef = useRef<Socket | null>(null)
 
   useEffect(() => {
@@ -25,6 +26,16 @@ export function useGameSocket(gameId: string | null, handlers: { onMoveMade?: (p
 
     socket.on('move_error', (err: any) => {
       handlers.onMoveError?.(err)
+    })
+
+    socket.on('game_resigned', (data: { color: 'w' | 'b' }) => {
+      console.log('🏳️ Game resigned by:', data.color === 'w' ? 'Blancas' : 'Negras')
+      handlers.onGameResigned?.(data)
+    })
+
+    socket.on('game_ended', (data: GameEnded) => {
+      console.log('🏁 Game ended:', data.winner, 'by', data.reason)
+      handlers.onGameEnded?.(data)
     })
 
     socket.io.on('reconnect', () => {
@@ -48,7 +59,13 @@ export function useGameSocket(gameId: string | null, handlers: { onMoveMade?: (p
     socketRef.current.emit('request_ai_move', { gameId })
   }
 
-  return { socket: socketRef.current, emitMove, emitRequestAIMove }
+  function emitResign(color: 'w' | 'b') {
+    if (!socketRef.current || !gameId) return
+    console.log('🏳️ Emitting resign to server...', { gameId, color })
+    socketRef.current.emit('resign', { gameId, color })
+  }
+
+  return { socket: socketRef.current, emitMove, emitRequestAIMove, emitResign }
 }
 
 export default useGameSocket

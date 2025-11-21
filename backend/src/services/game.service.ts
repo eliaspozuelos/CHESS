@@ -2,6 +2,8 @@ import { Chess } from 'chess.js'
 import { Game, GameConfig } from '../types'
 import StockfishService from './stockfish.service'
 import AIProviderService from './ai-provider.service'
+import { aiMoveQueue } from '../queues/ai-move.queue'
+import GameTimerService from './game-timer.service'
 
 class GameService {
   private games: Map<string, Game> = new Map()
@@ -33,12 +35,16 @@ class GameService {
 
     this.games.set(gameId, game)
     this.chessInstances.set(gameId, chess)
+    console.log(`✅ Game ${gameId} created and stored in GameService. Total games: ${this.games.size}`)
+
+    // Start game timer
+    GameTimerService.startTimer(gameId, game.whiteTime, game.blackTime, game.currentPlayer)
 
     // Auto-start AI vs AI games
     if (config.whitePlayer.type === 'ai' && config.blackPlayer.type === 'ai') {
       // Trigger first AI move after a short delay
       setTimeout(() => {
-        this.getAIMove(gameId).catch(err => {
+        this.requestAIMove(gameId).catch(err => {
           console.error('Error making initial AI move:', err)
         })
       }, 1000)
@@ -49,6 +55,11 @@ class GameService {
 
   getGame(gameId: string): Game | undefined {
     return this.games.get(gameId)
+  }
+
+  // Alias for compatibility
+  getGameById(gameId: string): Game | undefined {
+    return this.getGame(gameId)
   }
 
   async makeMove(gameId: string, from: string, to: string, promotion?: string): Promise<{
@@ -69,25 +80,51 @@ class GameService {
     }
 
     try {
+      // Get piece at source square for better error messages
+      const piece = chess.get(from as any)
+      const currentTurn = chess.turn()
+      
       const move = chess.move({ from, to, promotion })
       
       if (!move) {
-        return { success: false, error: 'Invalid move' }
+        // Provide more detailed error message
+        let errorMsg = `Invalid move: ${from} to ${to}`
+        
+        if (!piece) {
+          errorMsg += ` (no piece at ${from})`
+        } else if (piece.color !== currentTurn) {
+          errorMsg += ` (not your turn, current: ${currentTurn === 'w' ? 'white' : 'black'})`
+        } else {
+          errorMsg += ` (illegal move for ${piece.type})`
+        }
+        
+        console.log(`❌ ${errorMsg}`)
+        return { success: false, error: errorMsg }
       }
 
       // Update game state
       game.fen = chess.fen()
       game.pgn = chess.pgn()
+      const previousPlayer = game.currentPlayer
       game.currentPlayer = chess.turn()
       game.moves.push(move.san)
+
+      // Switch timer to new player
+      if (previousPlayer !== game.currentPlayer) {
+        GameTimerService.switchPlayer(gameId, game.currentPlayer)
+      }
 
       // Check for game end
       if (chess.isCheckmate()) {
         game.status = 'completed'
         game.winner = chess.turn() === 'w' ? 'black' : 'white'
+        GameTimerService.stopTimer(gameId)
+        console.log(`🏁 Game ${gameId} ended: ${game.winner} wins by checkmate`)
       } else if (chess.isDraw() || chess.isStalemate() || chess.isThreefoldRepetition()) {
         game.status = 'completed'
         game.winner = 'draw'
+        GameTimerService.stopTimer(gameId)
+        console.log(`🏁 Game ${gameId} ended: Draw`)
       }
 
       return {
@@ -106,17 +143,18 @@ class GameService {
     }
   }
 
-  async getAIMove(gameId: string, emitCallback?: (moveData: any) => void): Promise<{
-    success: boolean
-    move?: any
-    fen?: string
-    error?: string
-  }> {
+  async requestAIMove(gameId: string): Promise<{ success: boolean; jobId?: string; error?: string }> {
     const game = this.games.get(gameId)
     const chess = this.chessInstances.get(gameId)
 
     if (!game || !chess) {
       return { success: false, error: 'Game not found' }
+    }
+
+    // Check if game is still active
+    if (game.status !== 'active') {
+      console.log(`⏹️  Game ${gameId} is not active (status: ${game.status}), skipping AI move`)
+      return { success: false, error: 'Game is not active' }
     }
 
     const currentPlayer = game.currentPlayer === 'w' ? game.config.whitePlayer : game.config.blackPlayer
@@ -128,43 +166,68 @@ class GameService {
     const level = currentPlayer.aiLevel || 'intermediate'
     const aiModel = currentPlayer.aiModel || 'stockfish'
     
-    let move = null
-    
-    // Try to use the specified AI model (GPT/Claude)
-    if (aiModel !== 'stockfish') {
-      move = await AIProviderService.getMove(
-        aiModel as any,
-        chess.fen(),
+    try {
+      // Enqueue AI move job (non-blocking)
+      const job = await aiMoveQueue.add('ai-move', {
+        gameId,
+        fen: chess.fen(),
+        aiModel,
         level,
-        game.moves
-      )
+        moveHistory: game.moves
+      })
+
+      console.log(`📬 AI move job ${job.id} queued for game ${gameId}`)
+      
+      return { success: true, jobId: job.id }
+    } catch (error: any) {
+      console.error('Failed to queue AI move:', error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  async applyAIMove(gameId: string, move: any): Promise<{
+    success: boolean
+    move?: any
+    fen?: string
+    error?: string
+  }> {
+    // Check if game is still active before applying move
+    const game = this.games.get(gameId)
+    if (!game) {
+      console.log(`⚠️  Game ${gameId} not found, skipping AI move`)
+      return { success: false, error: 'Game not found' }
     }
     
-    // Fallback to Stockfish if AI provider fails or not configured
-    if (!move) {
-      move = await StockfishService.getBestMove(chess.fen(), level)
+    if (game.status !== 'active') {
+      console.log(`⚠️  Game ${gameId} is no longer active (status: ${game.status}), skipping AI move`)
+      return { success: false, error: `Game is ${game.status}` }
     }
-
-    if (!move) {
-      return { success: false, error: 'AI failed to generate move' }
-    }
-
+    
     const result = await this.makeMove(gameId, move.from, move.to, move.promotion)
     
-    // If callback provided, emit the move
-    if (emitCallback && result.success) {
-      emitCallback(result)
-    }
-    
     // If both players are AI and game is still active, schedule next move
-    if (result.success && game.status === 'active' && 
-        game.config.whitePlayer.type === 'ai' && 
-        game.config.blackPlayer.type === 'ai') {
-      setTimeout(() => {
-        this.getAIMove(gameId, emitCallback).catch(err => {
-          console.error('Error in AI vs AI move:', err)
-        })
-      }, 1000)
+    // Re-check game status after move (it could have ended with checkmate/stalemate)
+    const updatedGame = this.games.get(gameId)
+    if (result.success && updatedGame?.status === 'active') {
+      const currentPlayer = updatedGame.currentPlayer === 'w' 
+        ? updatedGame.config.whitePlayer 
+        : updatedGame.config.blackPlayer
+      
+      // Only request next AI move if current player is also AI (AI vs AI games)
+      if (updatedGame.config.whitePlayer.type === 'ai' && 
+          updatedGame.config.blackPlayer.type === 'ai' &&
+          currentPlayer.type === 'ai') {
+        // Use longer delay for AI vs AI to make moves visible (2.5 seconds)
+        setTimeout(() => {
+          // Double-check game is still active before requesting
+          const currentGame = this.games.get(gameId)
+          if (currentGame?.status === 'active') {
+            this.requestAIMove(gameId).catch(err => {
+              console.error('Error in AI vs AI move:', err)
+            })
+          }
+        }, 2500)
+      }
     }
     
     return result
@@ -180,10 +243,18 @@ class GameService {
     game.status = 'resigned'
     game.winner = color === 'w' ? 'black' : 'white'
     
+    // Stop timer
+    GameTimerService.stopTimer(gameId)
+    
+    const playerName = color === 'w' ? 'Blancas' : 'Negras'
+    console.log(`🏳️  Game ${gameId} ended: ${playerName} resigned. Winner: ${game.winner}`)
+    console.log(`⏹️  Any queued AI moves for this game will be skipped`)
+    
     return true
   }
 
   deleteGame(gameId: string): boolean {
+    GameTimerService.stopTimer(gameId)
     this.chessInstances.delete(gameId)
     return this.games.delete(gameId)
   }

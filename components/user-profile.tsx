@@ -35,8 +35,8 @@ export default function UserProfile({ onUserChange }: UserProfileProps) {
       alert("El nombre de usuario debe tener al menos 2 caracteres")
       return
     }
-    if (password.length < 4) {
-      alert("La contraseña debe tener al menos 4 caracteres")
+    if (password.length < 6) {
+      alert("La contraseña debe tener al menos 6 caracteres")
       return
     }
 
@@ -48,6 +48,8 @@ export default function UserProfile({ onUserChange }: UserProfileProps) {
       setUsername("")
       setPassword("")
       setIsCreating(false)
+    } catch (error: any) {
+      alert(error.message || 'Error al crear usuario. Intenta con otro nombre de usuario.')
     } finally {
       setIsBusy(false)
     }

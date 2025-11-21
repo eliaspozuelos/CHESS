@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card"
 import { ChevronRight, Clock } from "lucide-react"
 import PlayerSelector from "@/components/player-selector"
 import type { GameType, User } from "@/lib/types"
+import { useToast } from "@/hooks/use-toast"
 
 interface GameConfig {
   whitePlayer: {
@@ -27,9 +28,10 @@ interface GameSetupProps {
 }
 
 export default function GameSetup({ onStartGame, currentUser }: GameSetupProps) {
+  const { toast } = useToast()
   const [config, setConfig] = useState<GameConfig>({
     whitePlayer: { type: "human" },
-    blackPlayer: { type: "ai", aiModel: "gpt-4", aiLevel: "intermediate" },
+    blackPlayer: { type: "ai", aiModel: "Gemini Pro", aiLevel: "intermediate" },
     gameType: "rapid",
   })
 
@@ -55,6 +57,30 @@ export default function GameSetup({ onStartGame, currentUser }: GameSetupProps) 
   }
 
   const handleStartGame = () => {
+    // Validación: Verificar que los jugadores AI tengan modelo y nivel seleccionados
+    if (config.whitePlayer.type === "ai" && (!config.whitePlayer.aiModel || !config.whitePlayer.aiLevel)) {
+      toast({
+        title: "⚠️ Configuración incompleta",
+        description: "Por favor selecciona un modelo y nivel de dificultad para el jugador blanco",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (config.blackPlayer.type === "ai" && (!config.blackPlayer.aiModel || !config.blackPlayer.aiLevel)) {
+      toast({
+        title: "⚠️ Configuración incompleta",
+        description: "Por favor selecciona un modelo y nivel de dificultad para el jugador negro",
+        variant: "destructive"
+      })
+      return
+    }
+
+    toast({
+      title: "✅ Partida iniciada",
+      description: `${config.gameType === 'normal' ? 'Partida normal' : config.gameType === 'rapid' ? 'Partida rápida' : 'Blitz'} comenzando...`
+    })
+
     onStartGame(config)
   }
 
