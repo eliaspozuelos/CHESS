@@ -16,7 +16,7 @@ import useGameSocket from '@/hooks/useGameSocket'
 import { makeMove as engineMakeMove } from '@/lib/chess-engine'
 import { RotateCcw, Pause as Pause2, Play, Flag, GraduationCap, Eye, EyeOff, AlertCircle } from "lucide-react"
 import type { User, GameType } from "@/lib/types"
-import { getCurrentUser } from "@/lib/user-storage"
+import { getCurrentUser, updateUserStats } from "@/lib/user-storage"
 import { generateTeachContent, type TeachContent } from "@/lib/teach-mode"
 import { useToast } from "@/hooks/use-toast"
 
@@ -75,13 +75,23 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const lastValidFen = useRef<string | null>(null)
 
-  const handleGameEnd = async (winner: "white" | "black") => {
-    toast({
-      title: winner === "white" ? "🏆 Victoria de las Blancas" : "🏆 Victoria de las Negras",
-      description: gameStatus === "checkmate" ? "¡Jaque mate!" : gameStatus === "resigned" ? "El oponente se rindió" : "Juego terminado"
-    })
+  const handleGameEnd = async (winner: "white" | "black" | "draw") => {
+    // Determine if it's a draw
+    const isDraw = winner === "draw" || gameStatus === "stalemate"
 
-    onGameEnd(winner === "white" ? "win" : "loss", moves)
+    if (isDraw) {
+      toast({
+        title: "🤝 Empate",
+        description: "Partida terminada en tablas"
+      })
+      onGameEnd("draw", moves)
+    } else {
+      toast({
+        title: winner === "white" ? "🏆 Victoria de las Blancas" : "🏆 Victoria de las Negras",
+        description: gameStatus === "checkmate" ? "¡Jaque mate!" : gameStatus === "resigned" ? "El oponente se rindió" : "Juego terminado"
+      })
+      onGameEnd(winner === "white" ? "win" : "loss", moves)
+    }
 
     // Save game statistics to backend
     try {
@@ -105,7 +115,7 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
         blackPlayer: gameConfig.blackPlayer.type === "ai"
           ? `AI (${gameConfig.blackPlayer.aiModel})`
           : currentUser.username,
-        winner: winner,
+        winner: isDraw ? "draw" : winner,
         moves: moves.length,
         duration: gameDuration,
         userColor: userColor,
@@ -119,6 +129,23 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
       })
 
       console.log("✅ Statistics saved to backend")
+
+      // Also update localStorage for consistency
+      updateUserStats(currentUser.id, {
+        id: `game_${Date.now()}`,
+        date: gameResult.date,
+        gameType: gameResult.gameType,
+        whitePlayer: gameResult.whitePlayer,
+        blackPlayer: gameResult.blackPlayer,
+        winner: (isDraw ? "draw" : winner) as "white" | "black" | "draw",
+        moves: gameResult.moves,
+        duration: gameResult.duration,
+        userColor: userColor as "white" | "black",
+        opponentType: gameResult.opponentType,
+        opponentModel: gameResult.opponentModel
+      })
+
+      console.log("✅ Statistics updated in localStorage")
     } catch (err) {
       console.error("❌ Error saving game statistics:", err)
       toast({
@@ -539,27 +566,30 @@ export default function GameBoard({ gameConfig, currentUser, onGameEnd }: GameBo
                     </>
                   )}
                 </Button>
-                {!predictionMode ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleEnterPredictionMode}
-                    disabled={gameStatus !== "playing"}
-                    className="gap-2 bg-blue-500/10 border-blue-500 hover:bg-blue-500/20"
-                  >
-                    <Eye className="h-4 w-4" />
-                    Predicción
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleExitPredictionMode}
-                    className="gap-2 bg-blue-500/10 border-blue-500 hover:bg-blue-500/20"
-                  >
-                    <EyeOff className="h-4 w-4" />
-                    Salir Predicción
-                  </Button>
+                {/* Only show prediction mode button if at least one player is human */}
+                {!(gameConfig.whitePlayer.type === "ai" && gameConfig.blackPlayer.type === "ai") && (
+                  !predictionMode ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleEnterPredictionMode}
+                      disabled={gameStatus !== "playing"}
+                      className="gap-2 bg-blue-500/10 border-blue-500 hover:bg-blue-500/20"
+                    >
+                      <Eye className="h-4 w-4" />
+                      Predicción
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExitPredictionMode}
+                      className="gap-2 bg-blue-500/10 border-blue-500 hover:bg-blue-500/20"
+                    >
+                      <EyeOff className="h-4 w-4" />
+                      Salir Predicción
+                    </Button>
+                    )
                 )}
                 <Button
                   variant="outline"

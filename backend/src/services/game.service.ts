@@ -119,12 +119,18 @@ class GameService {
         game.status = 'completed'
         game.winner = chess.turn() === 'w' ? 'black' : 'white'
         GameTimerService.stopTimer(gameId)
+        const winnerName = game.winner === 'white' ? 
+          (game.config.whitePlayer.type === 'ai' ? game.config.whitePlayer.aiModel : 'Blancas') :
+          (game.config.blackPlayer.type === 'ai' ? game.config.blackPlayer.aiModel : 'Negras')
         console.log(`🏁 Game ${gameId} ended: ${game.winner} wins by checkmate`)
+        console.log(`🎉 ¡${winnerName} GANÓ la partida por jaque mate!`)
       } else if (chess.isDraw() || chess.isStalemate() || chess.isThreefoldRepetition()) {
         game.status = 'completed'
         game.winner = 'draw'
         GameTimerService.stopTimer(gameId)
-        console.log(`🏁 Game ${gameId} ended: Draw`)
+        const drawReason = chess.isStalemate() ? 'ahogado' : chess.isThreefoldRepetition() ? 'triple repetición' : 'tablas'
+        console.log(`🏁 Game ${gameId} ended: Draw (${drawReason})`)
+        console.log(`🤝 EMPATE - La partida terminó en ${drawReason}`)
       }
 
       return {
@@ -217,7 +223,7 @@ class GameService {
       if (updatedGame.config.whitePlayer.type === 'ai' && 
           updatedGame.config.blackPlayer.type === 'ai' &&
           currentPlayer.type === 'ai') {
-        // Use longer delay for AI vs AI to make moves visible (2.5 seconds)
+        // Use longer delay for AI vs AI to avoid API rate limits (4 seconds)
         setTimeout(() => {
           // Double-check game is still active before requesting
           const currentGame = this.games.get(gameId)
@@ -226,7 +232,7 @@ class GameService {
               console.error('Error in AI vs AI move:', err)
             })
           }
-        }, 2500)
+        }, 4000)
       }
     }
     

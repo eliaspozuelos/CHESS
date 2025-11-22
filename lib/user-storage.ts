@@ -164,6 +164,16 @@ export function getUserById(userId: string): User | null {
   return users.find((u) => u.id === userId) || null
 }
 
+// Update/save a user
+export function saveUser(user: User): void {
+  const users = getAllUsers()
+  const index = users.findIndex((u) => u.id === user.id)
+  if (index !== -1) {
+    users[index] = user
+    saveAllUsers(users)
+  }
+}
+
 // Get leaderboard (sorted by wins)
 export function getLeaderboard(): User[] {
   const users = getAllUsers()

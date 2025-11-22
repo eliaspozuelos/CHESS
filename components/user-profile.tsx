@@ -5,9 +5,10 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { getCurrentUser, createUser, authenticateUser, logoutUser } from "@/lib/user-storage"
+import { getCurrentUser, createUser, authenticateUser, logoutUser, saveUser } from "@/lib/user-storage"
 import type { User } from "@/lib/types"
 import { UserCircle, LogOut } from "lucide-react"
+import { apiFetch } from "@/lib/backend-api"
 
 interface UserProfileProps {
   onUserChange: (user: User | null) => void
@@ -23,11 +24,36 @@ export default function UserProfile({ onUserChange }: UserProfileProps) {
   const [isBusy, setIsBusy] = useState(false)
 
   useEffect(() => {
-    const user = getCurrentUser()
-    setCurrentUser(user)
-    onUserChange(user)
-    // if there's a current user, hide login form
-    if (user) setIsLoggingIn(false)
+    const loadUser = async () => {
+      const user = getCurrentUser()
+
+      if (user) {
+        // Sync stats from backend on page load
+        try {
+          const response = await apiFetch(`/api/users/${user.id}`)
+          if (response && response.user && response.user.stats) {
+            const updatedUser = {
+              ...user,
+              stats: response.user.stats
+            }
+            saveUser(updatedUser)
+            console.log("✅ Stats synced from backend on page load:", response.user.stats)
+            setCurrentUser(updatedUser)
+            onUserChange(updatedUser)
+            setIsLoggingIn(false)
+            return
+          }
+        } catch (err) {
+          console.warn("⚠️ Could not sync stats from backend on page load:", err)
+        }
+        setIsLoggingIn(false)
+      }
+
+      setCurrentUser(user)
+      onUserChange(user)
+    }
+
+    loadUser()
   }, [onUserChange])
 
   const handleCreateUser = async () => {
@@ -67,6 +93,21 @@ export default function UserProfile({ onUserChange }: UserProfileProps) {
         alert("Usuario o contraseña incorrectos")
         return
       }
+
+      // Sync stats from backend after login
+      try {
+        const response = await apiFetch(`/api/users/${user.id}`)
+        if (response && response.user && response.user.stats) {
+          // Update local user with backend stats
+          user.stats = response.user.stats
+          saveUser(user)
+          console.log("✅ Stats synced from backend after login:", response.user.stats)
+        }
+      } catch (err) {
+        console.warn("⚠️ Could not sync stats from backend:", err)
+        // Continue with local stats
+      }
+
       setCurrentUser(user)
       onUserChange(user)
       setUsername("")

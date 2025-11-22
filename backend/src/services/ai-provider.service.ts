@@ -31,14 +31,18 @@ class AIProviderService {
         return null
       }
 
-      if (model === 'gpt-3.5-turbo') {
-        return await this.getOpenAIMove(model, fen, level, moveHistory)
+      // Map frontend model names to backend model IDs
+      const modelLower = model.toLowerCase()
+      
+      if (modelLower.includes('gpt') || modelLower.includes('chatgpt')) {
+        return await this.getOpenAIMove('gpt-3.5-turbo', fen, level, moveHistory)
       }
 
-      if (model === 'gemini-2.0-flash-lite') {
-        return await this.getGeminiMove(model, fen, level, moveHistory)
+      if (modelLower.includes('gemini') || modelLower === 'gemini pro' || modelLower === 'gemini flash') {
+        return await this.getGeminiMove('gemini-2.0-flash-lite', fen, level, moveHistory)
       }
 
+      console.warn(`⚠️  Unknown AI model: ${model}`)
       return null
     } catch (error) {
       console.error(`Error getting AI move from ${model}:`, error)
@@ -108,6 +112,8 @@ class AIProviderService {
       return null
     }
 
+    console.log(`🔑 Gemini API Key configured: ${this.geminiApiKey.substring(0, 10)}...`)
+
     const chess = new Chess(fen)
     const legalMoves = chess.moves({ verbose: true })
 
@@ -115,6 +121,7 @@ class AIProviderService {
     const systemPrompt = 'You are a chess engine. Respond ONLY with a move in UCI format (e.g., "e2e4" or "e7e8q" for promotion). No explanations.'
 
     try {
+      console.log(`🌐 Calling Gemini API with model: ${model}`)
       // Usar el modelo directamente (solo soportamos gemini-2.0-flash-lite)
       const response = await axios.post(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiApiKey}`,
@@ -140,7 +147,7 @@ class AIProviderService {
           headers: {
             'Content-Type': 'application/json'
           },
-          timeout: 15000
+          timeout: 25000 // 25 segundos timeout
         }
       )
 
@@ -184,9 +191,11 @@ Instructions: ${levelInstructions[level]}
 
 ${moveHistory.length > 0 ? `Previous moves: ${moveHistory.join(' ')}` : 'Starting position'}
 
-Legal moves available: ${movesFormatted}
+IMPORTANT: You MUST choose one move from this exact list of legal moves:
+${movesFormatted}
 
-Choose the best move and respond ONLY with the move in UCI format (e.g., "e2e4" for normal moves or "e7e8q" for promotion to queen).`
+Respond ONLY with the move in UCI format from the list above (e.g., "e2e4" for normal moves or "e7e8q" for pawn promotion).
+DO NOT make up moves. DO NOT suggest illegal moves. ONLY use moves from the legal moves list.`
   }
 
   private parseUCIMove(uciMove: string): AIMove | null {

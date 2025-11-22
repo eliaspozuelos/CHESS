@@ -102,7 +102,16 @@ export default function Home() {
               <UserProfile onUserChange={setCurrentUser} />
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+              <Tabs value={activeTab} onValueChange={(value) => {
+                setActiveTab(value)
+                // Reload user when switching to stats tab to ensure fresh data
+                if (value === "stats" && currentUser) {
+                  const freshUser = require("@/lib/user-storage").getCurrentUser()
+                  if (freshUser) {
+                    setCurrentUser({ ...freshUser })
+                  }
+                }
+              }} className="space-y-6">
               <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-3">
                 <TabsTrigger value="game">Jugar</TabsTrigger>
                 <TabsTrigger value="stats" disabled={!currentUser}>
@@ -133,7 +142,7 @@ export default function Home() {
                 )}
               </TabsContent>
 
-              <TabsContent value="stats">{currentUser && <StatisticsDashboard user={currentUser} />}</TabsContent>
+                <TabsContent value="stats">{currentUser && <StatisticsDashboard key={currentUser.stats.gamesPlayed} user={currentUser} />}</TabsContent>
 
               <TabsContent value="ranking">
                 <Leaderboard />

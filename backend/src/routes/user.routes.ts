@@ -5,10 +5,10 @@ import { authMiddleware } from '../middleware/auth.middleware'
 const router = Router()
 
 // Get user profile
-router.get('/:userId', authMiddleware, (req: Request, res: Response) => {
+router.get('/:userId', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { userId } = req.params
-    const user = UserService.getUserById(userId)
+    const user = await UserService.getUserById(userId)
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
@@ -22,10 +22,10 @@ router.get('/:userId', authMiddleware, (req: Request, res: Response) => {
 })
 
 // Get leaderboard
-router.get('/leaderboard/top', (req: Request, res: Response) => {
+router.get('/leaderboard/top', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 10
-    const leaderboard = UserService.getLeaderboard(limit)
+    const leaderboard = await UserService.getLeaderboard(limit)
     res.json({ leaderboard })
   } catch (error: any) {
     res.status(500).json({ error: error.message })
@@ -33,14 +33,14 @@ router.get('/leaderboard/top', (req: Request, res: Response) => {
 })
 
 // Update user stats (called after game ends)
-router.post('/:userId/stats', authMiddleware, (req: Request, res: Response) => {
+router.post('/:userId/stats', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { userId } = req.params
     const gameResult = req.body
 
-    UserService.updateUserStats(userId, gameResult)
+    await UserService.updateUserStats(userId, gameResult)
     
-    const user = UserService.getUserById(userId)
+    const user = await UserService.getUserById(userId)
     const { passwordHash, ...userWithoutPassword } = user!
 
     res.json({

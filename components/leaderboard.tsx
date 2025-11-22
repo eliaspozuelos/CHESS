@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Trophy, Medal, Award, TrendingUp, Target } from "lucide-react"
-import { getLeaderboard } from "@/lib/user-storage"
+import { apiFetch } from "@/lib/backend-api"
 import type { User } from "@/lib/types"
 import { fmtDateGT } from "@/lib/format"
 
@@ -19,27 +19,35 @@ export default function Leaderboard() {
     loadLeaderboard()
   }, [sortBy])
 
-  const loadLeaderboard = () => {
+  const loadLeaderboard = async () => {
     setLoading(true)
-    const allUsers = getLeaderboard()
+    try {
+      // Fetch all users from backend
+      const response = await apiFetch('/api/users/leaderboard/top?limit=100')
+      const allUsers = response.leaderboard || []
 
-    const sorted = [...allUsers].sort((a, b) => {
-      switch (sortBy) {
-        case "wins":
-          return b.stats.gamesWon - a.stats.gamesWon
-        case "winRate":
-          const aRate = a.stats.gamesPlayed > 0 ? a.stats.gamesWon / a.stats.gamesPlayed : 0
-          const bRate = b.stats.gamesPlayed > 0 ? b.stats.gamesWon / b.stats.gamesPlayed : 0
-          return bRate - aRate
-        case "gamesPlayed":
-          return b.stats.gamesPlayed - a.stats.gamesPlayed
-        default:
-          return 0
-      }
-    })
+      const sorted = [...allUsers].sort((a, b) => {
+        switch (sortBy) {
+          case "wins":
+            return b.stats.gamesWon - a.stats.gamesWon
+          case "winRate":
+            const aRate = a.stats.gamesPlayed > 0 ? a.stats.gamesWon / a.stats.gamesPlayed : 0
+            const bRate = b.stats.gamesPlayed > 0 ? b.stats.gamesWon / b.stats.gamesPlayed : 0
+            return bRate - aRate
+          case "gamesPlayed":
+            return b.stats.gamesPlayed - a.stats.gamesPlayed
+          default:
+            return 0
+        }
+      })
 
-    setUsers(sorted)
-    setLoading(false)
+      setUsers(sorted)
+    } catch (err) {
+      console.error("Error loading leaderboard:", err)
+      setUsers([])
+    } finally {
+      setLoading(false)
+    }
   }
 
   const getRankIcon = (rank: number) => {

@@ -71,9 +71,9 @@ async function processAIMove(job: Job<AIMoveJobData>) {
       // Race between AI call and timeout
       const timeoutPromise = new Promise<null>((resolve) => {
         setTimeout(() => {
-          console.log(`   ⏱️  ${aiModel.toUpperCase()} TIMEOUT after 15s, falling back to Stockfish`)
+          console.log(`   ⏱️  ${aiModel.toUpperCase()} TIMEOUT after 30s, falling back to Stockfish`)
           resolve(null)
-        }, 15000) // 15 seconds timeout
+        }, 30000) // 30 seconds timeout
       })
       
       move = await Promise.race([movePromise, timeoutPromise])
@@ -86,7 +86,7 @@ async function processAIMove(job: Job<AIMoveJobData>) {
     
     // Fallback to Stockfish if needed
     if (!move) {
-      console.log(`   🔄 Using Stockfish as fallback...`)
+      console.log(`   🔄 Using Stockfish as fallback (no move generated)...`)
       move = await StockfishService.getBestMove(fen, level)
       await job.updateProgress(90)
     }
@@ -100,7 +100,21 @@ async function processAIMove(job: Job<AIMoveJobData>) {
     const result = testChess.move({ from: move.from, to: move.to, promotion: move.promotion })
     
     if (!result) {
-      throw new Error(`AI generated illegal move: ${move.from}${move.to}`)
+      console.warn(`⚠️  ${aiModel.toUpperCase()} generated illegal move: ${move.from}${move.to}, using Stockfish fallback`)
+      // Use Stockfish as fallback for invalid moves
+      move = await StockfishService.getBestMove(fen, level)
+      
+      if (!move) {
+        throw new Error(`Failed to generate valid move from Stockfish fallback`)
+      }
+      
+      // Validate Stockfish move
+      const testChess2 = new Chess(fen)
+      const result2 = testChess2.move({ from: move.from, to: move.to, promotion: move.promotion })
+      
+      if (!result2) {
+        throw new Error(`Even Stockfish generated illegal move: ${move.from}${move.to}`)
+      }
     }
     
     await job.updateProgress(100)
@@ -120,7 +134,45 @@ async function processAIMove(job: Job<AIMoveJobData>) {
     }
   } catch (error: any) {
     console.error(`❌ Worker error for game ${gameId}:`, error.message)
-    throw error
+    console.log(`   🆘 Attempting emergency Stockfish fallback...`)
+    
+    // Last resort: try Stockfish one more time
+    try {
+      const emergencyMove = await StockfishService.getBestMove(fen, level)
+      
+      if (!emergencyMove) {
+        throw new Error('Emergency Stockfish fallback also failed')
+      }
+      
+      // Validate emergency move
+      const emergencyChess = new Chess(fen)
+      const emergencyResult = emergencyChess.move({ 
+        from: emergencyMove.from, 
+        to: emergencyMove.to, 
+        promotion: emergencyMove.promotion 
+      })
+      
+      if (!emergencyResult) {
+        throw new Error('Emergency move validation failed')
+      }
+      
+      console.log(`✅ Emergency Stockfish fallback succeeded: ${emergencyMove.from} → ${emergencyMove.to}`)
+      
+      return {
+        success: true,
+        move: {
+          from: emergencyMove.from,
+          to: emergencyMove.to,
+          promotion: emergencyMove.promotion,
+          uci: `${emergencyMove.from}${emergencyMove.to}${emergencyMove.promotion || ''}`,
+          san: emergencyResult.san
+        },
+        fen: emergencyChess.fen()
+      }
+    } catch (emergencyError: any) {
+      console.error(`❌ Emergency fallback failed:`, emergencyError.message)
+      throw error // Throw original error
+    }
   }
 }
 
